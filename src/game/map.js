@@ -213,6 +213,13 @@ export class GameMap {
       C.set(k, im); // dùng gần đây nhất đứng cuối
       return im;
     };
+    // mini.jpg (bản đồ thu nhỏ, cùng tỉ lệ khung): vẽ lót dưới các ô — ô chưa tải kịp thì thấy hình bản đồ thay vì nền đen (trận 28/11/2026: nền đen thui khi ô chưa về, HUD vẫn hiện); ô đã tải thì đè kín lên trên, không đổi hình
+    const mini = this.info && this.info.mini;
+    if (mini) {
+      let im = this._miniIm;
+      if (!im) { im = new Image(); im.src = T.base + mini.file; this._miniIm = im; }
+      if (im.complete && im.naturalWidth) ctx.drawImage(im, 0, 0, im.naturalWidth, im.naturalHeight, Math.round(-cam.x), Math.round(-cam.y), this.w, this.h);
+    }
     for (let ty = ty0 - 1; ty <= ty1 + 1; ty++) for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
       const im = get(tx, ty);
       if (im && tx >= tx0 && tx <= tx1 && ty >= ty0 && ty <= ty1 && im.complete && im.naturalWidth) ctx.drawImage(im, Math.round(tx * S - cam.x), Math.round(ty * S - cam.y));

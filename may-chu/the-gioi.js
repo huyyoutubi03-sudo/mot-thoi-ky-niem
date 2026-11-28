@@ -43,6 +43,9 @@ const gocCau = () => { const d = new Date(GOC_BAT + 7 * 3600e3).toISOString(); r
 const PT_MAX = 8; // phân thân đang theo gửi cho người cùng bãi: người chơi tối đa phanThan.toiDa (2 — phan-than.js chặn lúc gọi), quản trị không giới hạn (anh 18/11) — gửi tối đa 8
 
 const ben = new Map(); // tên tài khoản -> người đang trong game
+let AI_CACHE = null; // { khoa: "zone|chung", luc, ds: [[k, recs]] } — bản ghi ai của cả bãi (phe/cờ/bang/phân thân đã tính sẵn), dùng chung cho mọi nhịp trong 120 ms: bãi ~200 người thì không còn tra phe/bang theo cặp người xem × người khác
+const AI_TTL = 120;
+let CON_LUC = 0; // lần cuối dọn người rời khỏi ben
 const AN = new Set(); // tài khoản đang tàng hình (chỉ "test1"/"test2" — Huy lệnh 01:54 27/11/2026, mở thêm test2 16:57 27/11/2026): nhịp mang s.th = 1 thì vào, th = 0 / hết nhịp / roi() thì ra;
 // người trong AN không vào danh sách ai của người khác (kể cả phân thân), không phát vị trí qua kênh vt/vtb, không nhận "chieu" (may-chu/ws.js),
 // tin chat gửi lúc đang ẩn không lộ tên với người nhận (an — Huy chốt 06:59 27/11/2026)
@@ -124,6 +127,20 @@ function ccDau(h, t) {
 }
 
 function conLai(t) { for (const [k, b] of ben) if (t - b.at > BEN_MS) { ben.delete(k); AN.delete(k); } }
+// Dựng 1 lần cho cả bãi (ảnh chụp, không sửa sau khi dựng): phe/cờ/bang/phân thân của mỗi người chỉ tính 1 lần, mọi nhịp trong AI_TTL dùng chung. Người xem + cùng phòng ải lọc ở nhịp riêng.
+function aiBaiChung(zone, chung, t) {
+  const khoa = zone + "|" + (chung ? 1 : 0);
+  if (AI_CACHE && AI_CACHE.khoa === khoa && t - AI_CACHE.luc <= AI_TTL) return AI_CACHE.ds;
+  const ds = [];
+  for (const [k, x] of ben) {
+    if (AN.has(k) || x.zone !== zone || (!(!!x.chung === !!chung) && !x.npc)) continue;
+    const { at, zone: _z, lead, chung: _c, pt, oNv: _o, bh, bhp: _bp, bid: _bi, bhc, ...r } = x, g = GD().co(k), tkp = TKM().pheCua(k, x.zone), cp = pheNay(k, x, tkp);
+    ds.push([k, [{ ...r, cp, ...(bh && tkp == null ? { bh, ...(bhc ? { bhc } : {}) } : {}), ...(TD().coMo(k) ? { co: 1 } : {}), ...(g ? { gd: g } : {}) },
+      ...(pt || []).map(({ i, ...c }) => ({ ...c, cp, hp: 100, mp: 100, pt: 1, chu: x.name }))]]);
+  }
+  AI_CACHE = { khoa, luc: t, ds };
+  return ds;
+}
 
 function nhip(tk, b) {
   const t = Date.now(), oNv = nguyen(b.o, 0, tk.nv.length - 1), h = tk.nv[oNv];
@@ -146,17 +163,13 @@ function nhip(tk, b) {
     { const kv = tk.ten + "\u0001" + h.name, cv = VT_NV.get(kv), z = s.tr[s.tr.length - 1] || (cung ? tr[tr.length - 1] : null);
       if (z) VT_NV.set(kv, { zone: s.zone, x: z[1], y: z[2], at: t, n: ((cv && cv.n) | 0) + 1 }); }
   } else { ben.delete(tk.ten); AN.delete(tk.ten); } // rời game (s = null): thôi tàng hình
-  conLai(t);
+  if (t - CON_LUC > 1000) { CON_LUC = t; conLai(t); } // dọn người rời: 1 lần/giây là đủ (BEN_MS 6 giây) — trước đây mỗi nhịp của mỗi người đều quét cả bãi
   const toi = ben.get(tk.ten);
   // co: đội trưởng của đội đang mở -> cờ trên đầu (to-doi.js coMo — engine menu state 队伍开放状态)
   // + phân thân đang theo của họ (pt: 1 — cùng phe người thuê, không qt / cờ)
   // bh: nhãn bang của người đó (đã dựng ở nhịp của họ) — người đang trong Tống Kim không gửi (bot không có bang, anh chốt C4); bhp (phe bang) chỉ để tính cp, không gửi
   // P4 (26/11/2026, Huy chốt): bot NPC (x.npc) hiện ở cả bản riêng lẫn bản quái chung — người chơi thật vẫn chỉ thấy cùng bản.
-  const ai = toi ? [...ben].filter(([k, x]) => k !== tk.ten && !AN.has(k) && x.zone === toi.zone && (!x.chung === !toi.chung || x.npc) && VAI().cungCho(k, tk.ten, x.zone)).flatMap(([k, x]) => {
-    const { at, zone, lead, chung, pt, oNv: _o, bh, bhp: _bp, bid: _bi, bhc, ...r } = x, g = GD().co(k), tkp = TKM().pheCua(k, x.zone), cp = pheNay(k, x, tkp);
-    // bhc: mã chức của người đó (màu chức vụ ở dòng bang — mẫu 4, anh 14/11)
-    return [{ ...r, cp, ...(bh && tkp == null ? { bh, ...(bhc ? { bhc } : {}) } : {}), ...(TD().coMo(k) ? { co: 1 } : {}), ...(g ? { gd: g } : {}) }, ...(pt || []).map(({ i, ...c }) => ({ ...c, cp, hp: 100, mp: 100, pt: 1, chu: x.name }))];
-  }) : [];
+  const ai = toi ? aiBaiChung(toi.zone, toi.chung, t).filter(([k]) => k !== tk.ten && VAI().cungCho(k, tk.ten, toi.zone)).flatMap(([, recs]) => recs) : [];
   // tin chat: mới hơn mã đã nhận (lần đầu, hoặc máy chủ vừa bật lại nên mã đã nhận > mã mới nhất: TIN_DAU tin gần nhất); không gửi
   // lại tin của chính mình; phụ cận / thành thị chỉ cùng bản đồ; kênh Bang hội chỉ cùng bang (mã bang của nhân vật đang chơi — tra O(1))
   const doi = TD().idCua(tk.ten);

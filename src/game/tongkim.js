@@ -287,6 +287,17 @@ export const TongKim = {
     const w = this.w, st = this.st;
     if (!p || !w || !st || !this.mo || w.zone.id !== p.bai) return;
     this.p = p; this.tinLuc = performance.now(); st.lan++;
+    // gộp hàng đủ điểm (10 trường, máy chủ gửi 1 lần/giây khi đông) vào hàng nhẹ (7 trường): bảng Chiến báo vẫn thấy đủ điểm, vị trí trường giữ nguyên
+    if (Array.isArray(p.ng)) {
+      const M = this._ngDiem || (this._ngDiem = new Map()), co = new Set();
+      p.ng = p.ng.map((r) => {
+        if (!Array.isArray(r)) return r;
+        co.add(r[0]);
+        if (r.length >= 10) { M.set(r[0], r); return r; }
+        return M.has(r[0]) ? M.get(r[0]) : r;
+      });
+      for (const k of [...M.keys()]) if (!co.has(k)) M.delete(k); // bỏ tên đã rời phòng
+    }
     if (+p.gio > 0) this.lech = +p.gio - Date.now(); // giờ máy chủ (đếm giờ khai chiến / còn lại / về Biện Kinh)
     const me = this.api.ten(), phe = p.phe | 0;
     if (p.loai) st.tran = p.loai === "tran";

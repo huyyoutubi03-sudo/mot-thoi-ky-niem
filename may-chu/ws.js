@@ -139,18 +139,21 @@ function guiBai(zone, obj, tru, roi, chon) {
 // GUI_LUC: lần gửi tin gom gần nhất của từng bãi — bãi chưa gửi trong GOM_MS mà có mốc mới (người vừa bắt đầu chạy ở bãi vắng) thì gửi ngay, không chờ lượt
 const GOM_MS = 50, GOM = new Map(), GUI_LUC = new Map(); // "bãi|chung" -> Map(kn gửi -> [tên nhân vật, mốc]) / -> lúc gửi
 let soCu = 0;
+let DEM_BAI = new Map(); // "bãi|chung" -> số kết nối trong bãi (đếm lại mỗi giây) — bãi đông thì gom vị trí thưa hơn
+const gomMsCua = (k) => (DEM_BAI.get(k) || 0) > 80 ? 100 : GOM_MS; // bãi > 80 người: vtb 10 lần/giây thay vì 20 — điện thoại bớt nghẹt, nội suy phía client vẫn mượt (trước đây 10 lần/giây cũng đủ — độ mượt bước 1)
 function gomVt(kn, ten, tr) {
   if (kn.zone == null || kn.zone < 0 || !Array.isArray(tr) || !tr.length) return;
   const k = kn.zone + "|" + (kn.chung ? 1 : 0); let g = GOM.get(k); if (!g) GOM.set(k, (g = new Map()));
   const cu = g.get(kn); if (cu && cu[0] === ten) cu[1].push(...tr); else g.set(kn, [ten, tr.slice()]);
-  if (Date.now() - (GUI_LUC.get(k) || 0) >= GOM_MS) xaGom(k);
+  if (Date.now() - (GUI_LUC.get(k) || 0) >= gomMsCua(k)) xaGom(k);
 }
 function xaGom(chi) {
   if (!GOM.size) return;
   const L = chi != null ? (GOM.has(chi) ? [[chi, GOM.get(chi)]] : []) : [...GOM];
-  if (chi != null) GOM.delete(chi); else GOM.clear();
   const t = Date.now();
   for (const [k, g] of L) {
+    if (t - (GUI_LUC.get(k) || 0) < gomMsCua(k)) continue; // chưa tới lượt xả của bãi này — giữ mốc lại, gom tiếp đợt sau
+    GOM.delete(k);
     GUI_LUC.set(k, t);
     const i = k.indexOf("|"), zone = +k.slice(0, i), chung = k.slice(i + 1) === "1";
     const gui = [...g.keys()], muc = [...g.values()], phong = !!(loc && locCan && locCan(zone));
@@ -164,7 +167,7 @@ function xaGom(chi) {
   }
 }
 setInterval(() => { try { xaGom(); } catch (e) { console.error("ws gom vị trí: " + e.message); } }, GOM_MS).unref();
-setInterval(() => { let n = 0; for (const kn of ds.values()) if (!kn.dong && !kn.vtb && kn.zone >= 0) n++; soCu = n; const t = Date.now(); for (const [k, l] of GUI_LUC) if (t - l > 60000) GUI_LUC.delete(k); }, 1000).unref();
+setInterval(() => { let n = 0; const dem = new Map(); for (const kn of ds.values()) if (!kn.dong && kn.zone >= 0) { if (!kn.vtb) n++; const kk = kn.zone + "|" + (kn.chung ? 1 : 0); dem.set(kk, (dem.get(kk) || 0) + 1); } soCu = n; DEM_BAI = dem; const t = Date.now(); for (const [k, l] of GUI_LUC) if (t - l > 60000) GUI_LUC.delete(k); }, 1000).unref();
 const coCu = () => soCu > 0;
 // hiệu ứng chiêu (anh 31/10 "cho người khác thấy hiệu ứng của người chơi khác khi đánh boss"): { t: "chieu", id, lv, x, y, px, py } -> người khác cùng
 // bãi nhận { t: "chieu", ten (tên nhân vật), id, lv, x, y, px, py } để vẽ lại (src/game/vocong.js chieuAo — không sát thương); tối đa 1 tin / 60 ms / người.

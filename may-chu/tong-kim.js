@@ -226,11 +226,16 @@ const doiHp = (e) => { e.hv = ++D.hv; D.doi = true; };
 function phat(on, t = Date.now()) {
   D.guiLuc = t; D.doi = false;
   const tran = D.loai === "tran", kk = D.kk.slice(-KK_GUI), chu = tenChu();
-  const ng = [...D.nguoi.values()].map((m) => [m.ten, m.phe, m.diem, m.giet, m.chet, m.chuc, on.has(m.tk) ? 1 : 0, m.binh | 0, m.lienMax | 0, m.lt | 0]);
+  // ng: đủ điểm 1 lần/giây (bảng Chiến báo), các lần khác chỉ nhẹ (tên/phe/chức/trong phòng — datNguoi chỉ dùng 4 trường này); chỉ dựng bản đủ khi tới lượt, không dựng cả hai
+  const dayDiem = t - (D.ngDLuc || 0) >= 1000;
+  if (dayDiem) D.ngDLuc = t;
+  const ng = dayDiem ? [...D.nguoi.values()].map((m) => [m.ten, m.phe, m.diem, m.giet, m.chet, m.chuc, on.has(m.tk) ? 1 : 0, m.binh | 0, m.lienMax | 0, m.lt | 0])
+    : [...D.nguoi.values()].map((m) => [m.ten, m.phe, 0, 0, 0, m.chuc, on.has(m.tk) ? 1 : 0]);
   const top = xepDiem().slice(0, 10).map(dongDiem);
   const tt = { loai: D.loai, pha: phaCua(t), kc: D.kc || 0, het: D.het || 0, soaiLuc: D.soaiLuc ? D.soaiLuc.slice() : null,
     soaiMoc: tran ? [D.kc + D.s1, D.kc + D.s2] : null, thang: D.thang == null ? null : D.thang, bsv: D.bsv };
-  const dsHp = () => [...D.bot.values(), ...D.binh.values()];
+  const dsHpArr = [...D.bot.values(), ...D.binh.values()]; // dựng 1 lần cho cả lần gửi, không dựng lại mỗi người (nhánh hd)
+  const snVer = D.snVer || (D.snVer = new Map());
   let b = null, vt = null, sn = null, bi = null, hp = null;
   for (const [tk, kn] of on) {
     const m = D.nguoi.get(tk); if (!m) continue;
@@ -238,9 +243,18 @@ function phat(on, t = Date.now()) {
       me: [m.diem, m.giet, m.chet, m.chuc, m.binh | 0, m.lienMax | 0, m.lt | 0], diem: D.diem, ng, top, ...tt };
     if (m.daSv !== D.sv) { p.b = b || (b = [...D.bot.values()].map(dongB)); p.vt = vt || (vt = [...D.vt].map(([id, v]) => [id, v[0], v[1]])); p.chucHs = [CF.chucMau, CF.chucThu]; if (D.mauBot.length) p.mb = D.mauBot; m.daSv = D.sv; }
     if (m.daBsv !== D.bsv) { p.bi = bi || (bi = [...D.binh.values()].map(dongBi)); m.daBsv = D.bsv; }
-    if (m.daSn !== D.snSv) { p.sn = sn || (sn = Object.fromEntries([...D.nguoi.values()].filter((x) => x.snap).map((x) => [x.ten, x.snap]))); m.daSn = D.snSv; }
-    if (!tran || m.daHv == null || t - (m.hpLuc || 0) >= NHAC_MS) { p.hp = hp || (hp = dsHp().map(hpCua)); m.hpLuc = t; }
-    else p.hd = dsHp().filter((e) => (e.hv | 0) > m.daHv).map(hpCua);
+    if (m.daSn !== D.snSv) {
+      // mới vào (daSn < 0): gửi đủ bộ; đã có rồi: chỉ mục đổi từ lần gửi trước của người đó (delta theo tên — client gộp theo tên, không cần đủ bộ)
+      if (m.daSn == null || m.daSn < 0) p.sn = sn || (sn = Object.fromEntries([...D.nguoi.values()].filter((x) => x.snap).map((x) => [x.ten, x.snap])));
+      else {
+        const d = {};
+        for (const [ten2, ver] of snVer) if (ver > m.daSn) { const x = D.tenNg.get(ten2); if (x && x.snap) d[ten2] = x.snap; }
+        if (Object.keys(d).length) p.sn = d;
+      }
+      m.daSn = D.snSv;
+    }
+    if (!tran || m.daHv == null || t - (m.hpLuc || 0) >= NHAC_MS) { p.hp = hp || (hp = dsHpArr.map(hpCua)); m.hpLuc = t; }
+    else p.hd = dsHpArr.filter((e) => (e.hv | 0) > m.daHv).map(hpCua);
     m.daHv = D.hv;
     const moi = D.tin.filter((r) => r[0] > (m.daTin | 0));
     if (moi.length) { p.tin = moi; m.daTin = moi[moi.length - 1][0]; }
@@ -515,7 +529,7 @@ const VIEC = {
     D.tenNg.set(m.ten, m);
     kn.tkVao = D.mo; kn.tkDt = m.dt;
     if (tran && vaoMoi) roiDoi(kn.ten, m.ten);
-    if (doiSnap) D.snSv++; // bản chụp đổi mới gửi lại cả phòng
+    if (doiSnap) { D.snSv++; (D.snVer || (D.snVer = new Map())).set(m.ten, D.snSv); } // bản chụp đổi: chỉ gửi lại mục đổi (phat — delta theo tên), không gửi lại cả phòng
     D.doi = true;
   },
   tkAn(kn, tin, m) { m.an = !!tin.an; },
@@ -572,7 +586,7 @@ const VIEC = {
         if (b.mau <= 0) { chetBinh(b, A.x); coChet = true; }
       } else if (b.mau <= 0) { chetBot(b, A.x); coChet = true; }
     }
-    if (coChet) phat(trong());
+    if (coChet) D.doi = true; // hạ gục: báo ở nhịp theo lịch chung (vong — thưa khi đông), không gửi ngay cả phòng ngoài nhịp
     // choáng / chậm người chơi gây cho bot / quân phe kia -> chủ trận (máy chạy não)
     const st = [];
     for (const r of Array.isArray(tin.st) ? tin.st.slice(0, 60) : []) {
@@ -734,7 +748,7 @@ function botDanh(tk, ds) {
       if (b.mau <= 0) { chetBinh(b, A.x); coChet = true; }
     } else if (b.mau <= 0) { chetBot(b, A.x); coChet = true; }
   }
-  if (coChet) phat(trong());
+  if (coChet) D.doi = true; // như trên: hạ gục báo ở nhịp theo lịch chung
   return n;
 }
 // bot (người) bị bot khác đánh — như tkn nhưng sát thương trừ thẳng vào hp máy chủ giữ
@@ -818,7 +832,7 @@ function moTran(opt = {}) {
   const hau = (p) => { const L = ds2((((td.phe[p] || {}).hau) || {}).diem); return L.length ? [Math.round(+L[0][0]), Math.round(+L[0][1])] : [0, 0]; };
   D = { mauBot: MAU_BOT.slice(), loai: "tran", bai, mo: moCuoi, td, gio, u, kc, het, s1: Math.round(s1 * 60000), s2: Math.round(s2 * 60000), vm: Math.round(vm * 60000), tl: dn / DANH_GOC, x2, thu: !!opt.thu,
     trai: [hau(0), hau(1)], R: CF.R, tri: Math.max(1, Math.min(3, CF.tri | 0)), hs: Math.max(HS[0], Math.min(HS[1], +CF.heSoSt || 1)), soBot, cap: 0, moi: 1, chung: 0,
-    sv: 1, snSv: 1, bsv: 1, hv: 0, nguoi: new Map(), tenNg: new Map(), bot: new Map(), vt: new Map(), binh: new Map(), dk: new Map(), chu: null, diem: [0, 0],
+    sv: 1, snSv: 1, snVer: new Map(), ngDLuc: 0, bsv: 1, hv: 0, nguoi: new Map(), tenNg: new Map(), bot: new Map(), vt: new Map(), binh: new Map(), dk: new Map(), chu: null, diem: [0, 0],
     kk: [], doi: true, guiLuc: 0, han: new Map(), hanHoi: new Map(), hanC: new Map(), seq: 0, bseq: 99999, phai: [tron(PHAI), tron(PHAI)],
     ten: { nam: [], nu: [], chung: [] }, thatTen: new Set(), batDau: false, ket: null, ketLuc: 0, raLuc: 0, thang: null, soaiLuc: null, soaiRa: [0, 0],
     soaiSt: [new Map(), new Map()], dot: [], tin: [], tinId: 0, baoLuc: t, bao3: false, bao1: false, doiCho: new Map() };
@@ -1014,7 +1028,9 @@ function vong(t = Date.now()) {
     const hs = (+CF.hoiSinh || 0) * 1000;
     for (const b of D.bot.values()) if (b.chet && t - b.chet >= hs) { b.chet = 0; b.mau = b.mauMax; b.hoi++; D.vt.delete(b.id); doiHp(b); }
   }
-  if ((D.doi && t - D.guiLuc >= GUI_MS) || t - D.guiLuc >= NHAC_MS) phat(on, t);
+  // bãi đông (> 60 người trong phòng): trạng thái trận tối đa 2 lần/giây — 10 lần/giây mang đủ bảng ~200 người làm điện thoại nghẹt tin (lag trận 28/11/2026); ít người giữ 100 ms như cũ
+  const guiMs = on.size > 60 ? 500 : GUI_MS;
+  if ((D.doi && t - D.guiLuc >= guiMs) || t - D.guiLuc >= NHAC_MS) phat(on, t);
 }
 setInterval(() => { try { vong(); } catch (e) { console.error("Tống Kim:", e && e.message); } }, 100).unref();
 
@@ -1045,7 +1061,7 @@ function mo(b, tk) {
   if (D) { D = null; WS.guiHet(moTin()); }
   const kq = tk && WS.cua(tk.ten), chung = kq && kq.zone === bai && kq.chung ? 1 : 0, moi = b.moi === 1 || b.moi === true || b.moi === "1" ? 1 : 0; // bản quái của người mở chỉ khi đứng đúng bãi
   moCuoi = Math.max(Date.now(), moCuoi + 1);
-  D = { mauBot: MAU_BOT.slice(), loai: "thu", bai, mo: moCuoi, trai: b.trai.map((p) => [Math.round(p[0]), Math.round(p[1])]), R: CF.R, tri, hs, soBot, cap, moi, chung, sv: 1, snSv: 1,
+  D = { mauBot: MAU_BOT.slice(), loai: "thu", bai, mo: moCuoi, trai: b.trai.map((p) => [Math.round(p[0]), Math.round(p[1])]), R: CF.R, tri, hs, soBot, cap, moi, chung, sv: 1, snSv: 1, snVer: new Map(), ngDLuc: 0,
     bsv: 1, hv: 0, nguoi: new Map(), tenNg: new Map(), bot: new Map(), vt: new Map(), binh: new Map(), dk: new Map(), chu: null, diem: [0, 0], kk: [], doi: true,
     guiLuc: 0, han: new Map(), hanHoi: new Map(), hanC: new Map(), seq: 0, bseq: 99999, phai: [tron(PHAI), tron(PHAI)], ten: docTen(), thatTen: tenThat(),
     kc: 0, het: 0, s1: 0, s2: 0, thang: null, soaiLuc: null, soaiRa: [0, 0], soaiSt: [new Map(), new Map()], ket: null, tin: [], tinId: 0, doiCho: new Map() };
@@ -1087,6 +1103,9 @@ function quanTri(b, tk) {
 // Mở/đóng thử qua F10 Lịch hoạt động (may-chu/lich-hd.js gọi thẳng export này — như phong-hoa.js).
 function moThu(qt, b) { return quanTri({ viec: "moThu" }); }
 function dongThu(qt, b) { if (!D || !D.thu) loi("Không có phiên thử Tống Kim nào."); huyTran("thu"); return { dong: 1, l: lich() }; }
+// Bật ngay (F10 Lịch hoạt động — lich-hd.js): trận THẬT, có thưởng — báo danh 1 phút, đánh đủ CF.danh; soai1/soai2/vaoMuon/soBot để
+// undefined → moTran tự lấy CF đã co giãn; trận đang chạy thì moTran() chặn sẵn.
+function batNgay(qt, b) { return quanTri({ viec: "moTran", baoDanh: 1, danh: CF.danh }); }
 
 // phe trận của tài khoản tk (đã vào phòng đang mở) -> 0 | 1 | null; zone (nếu đưa): chỉ khi đang ở bãi phòng (the-gioi.js pheNay — màu tên / vòng sáng)
 function pheCua(tk, zone) {
@@ -1292,7 +1311,7 @@ function lam(h, b, tk) {
   }
 }
 
-module.exports = { CF, quanTri, moThu, dongThu, pheCua, lam, lich, dangTran, dangDanh, trongTran, boBuffTk, hoanTran, hoanGiay, giaThuocTk, boThuocTk, vatTk, choDoi, giaTk, BIEN_KINH, BAO_DANH, mauBotDs, mauBotThem, mauBotXoa,
+module.exports = { CF, quanTri, moThu, dongThu, batNgay, pheCua, lam, lich, dangTran, dangDanh, trongTran, boBuffTk, hoanTran, hoanGiay, giaThuocTk, boThuocTk, vatTk, choDoi, giaTk, BIEN_KINH, BAO_DANH, mauBotDs, mauBotThem, mauBotXoa,
   botVao, botRa, botDanh, botBiDanh, botNguoi, botHoiSinh,
   pvp: { stCua, thung, BUA_GOC, ST_MAX, HS }, // Lôi Đài (anh 15/11 — may-chu/loi-dai.js ldn): dùng chung kiểm đòn PvP, không đổi gì của Tống Kim
   _thu: { get D() { return D; }, vong, trong, chonChu, phat, cong, chetBot, chucCua, diemGiet, LIEN, PHAI, tenBot, themBot, datSoBot, tomTat, stCua, viec: VIEC,
